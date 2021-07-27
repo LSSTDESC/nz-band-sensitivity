@@ -1,0 +1,3 @@
+h5py
+numpy
+git+github.com/joezuntz/xpysom@torus
