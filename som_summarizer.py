@@ -2,7 +2,7 @@ import numpy as np
 import xpysom
 import h5py
 import pickle
-
+import yaml
 # 1) make and save the deep som
 # 2) make and save the wide som
 # 3) use the redshift and overlap samples to complete the process
@@ -10,19 +10,22 @@ import pickle
 
 class LupticolorSom:
 
-    def __init__(self, som_config, data_config, comm=None):
+    def __init__(self, som_config, data_config, norm_config, comm=None):
         self.bands = data_config['bands']
-        self.depths = data_config['depths']
         self.use_band = data_config.get('use_band', None)
-        self.mag_min = data_config.get("mag_min", 22)
-        self.mag_max = data_config.get("mag_max", 28)
-        self.nband = len(self.bands)
-        self.nfeat = self.nband - 1 if self.use_band is None else self.nband
+
+        self.depths = norm_config['depths']
+        self.mag_min = norm_config.get("mag_min", 22)
+        self.mag_max = norm_config.get("mag_max", 28)
 
         self.dim = som_config['dim']
         self.rate = som_config['rate']
         self.sigma = som_config['sigma']
         self.epochs = som_config['epochs']
+
+        self.nband = len(self.bands)
+        self.nfeat = self.nband - 1 if self.use_band is None else self.nband
+
 
         self.comm = comm
 
@@ -60,7 +63,7 @@ class LupticolorSom:
             m = luptitude(indata[self.use_band], depth)
             outdata[:, self.nband - 1] = (m - self.mag_min) / (self.mag_max - self.mag_min)
             names.append(self.use_band)
-        print(names, outdata.shape, outdata.min(axis=0), outdata.max(axis=0), outdata.mean(axis=0), outdata.std(axis=0))
+
         return names, outdata
 
     def winner(self, indata):
@@ -83,7 +86,6 @@ def luptitude(mag, depth, m0=22.5):
     Convert magnitudes to Luptitudes
     """
     a = 2.5 * np.log10(np.e)
-    # replace with 10 sigma mag depths of survey (or similar)
     sigmax = 0.1 * np.power(10, (m0 - depth) / 2.5)
     b = 1.042 * sigmax
     mu0 = m0 - 2.5 * np.log10(b)
@@ -97,9 +99,16 @@ class SOMSummarizer:
         self.comm = comm
 
     def run(self):
-        stream = self.data_stream(self.config['deep']['input'])
-        deep_som = self.make_deep_som(stream)
+        deep_som = self.make_som(self.config['deep'])
+        self.save_som(deep_som, self.config['output']['deep_som'])
+
+        # Could save this out here also
         deep_zmap = self.make_deep_zmap(deep_som)
+        # wide_som = self.make_som(self.config['wide'])
+
+    def save_som(self, som, outfile):
+        if self.comm is None or self.comm.rank == 0:
+            pickle.dump(som, open(outfile, 'wb'))
 
 
     def data_stream(self, config, extra=None):
@@ -118,11 +127,9 @@ class SOMSummarizer:
 
         with h5py.File(filename) as f:
             g = f[group]
-            print(g, cols[0])
             sz = g[cols[0]].size
             if nmax:
                 sz = min(nmax, sz)
-
 
             if stream:
                 # should randomize the ordering here I think, just
@@ -133,7 +140,7 @@ class SOMSummarizer:
                 block_size = int(np.ceil(sz / size))
                 s = block_size * rank
                 e = s + block_size
-                print(f"Rank {rank} training on data range {s} - {e} from total range 0 - {sz}")
+                print(f"Rank {rank} reading {filename} data range {s} - {e} from total range 0 - {sz}")
                 data = {b: g[col][s:e] for b,col in zip(bands,cols)}
                 for name, col in extra.items():
                     data[name] = g[col][s:e]
@@ -141,18 +148,18 @@ class SOMSummarizer:
                 yield data
 
 
-    def make_deep_som(self, data_stream):
-        som_config = self.config['deep']['som']
-        data_config = self.config['deep']['input']
-        outfile = self.config['output']['deep_som']
-        som = LupticolorSom(som_config, data_config, comm=self.comm)
+    def make_som(self, config):
+        som_config = config['som']
+        data_config = config['input']
+        norm_config = self.config['norm']
+
+        som = LupticolorSom(som_config, data_config, norm_config, comm=self.comm)
 
         # TODO figure out epoch / iter thing to get training right
+        data_stream = self.data_stream(data_config)
+
         for data in data_stream:
             som.add_data(data)
-
-        if self.comm is None or self.comm.rank == 0:
-            pickle.dump(som, open(outfile, 'wb'))
 
         return som
 
@@ -176,45 +183,13 @@ class SOMSummarizer:
         zmean = zsum / count
         zsigma = np.sqrt(zsum2 / count - zmean**2) 
         outfile = self.config["output"]["zmaps"]
-        pickle.dump((zmean, zsigma, count), open(outfile, "wb"))
+        pickle.dump((count, zmean, zsigma), open(outfile, "wb"))
+
+        return count, zmean, zsigma
 
 
 def main():
-    config = {
-        "spectroscopic": {
-            # in this case use the same data file
-            "file": "./spectroscopic_data.hdf5",
-            "stream": False,
-            "group": "/",
-            "bands": "ugrizy",
-            "band_name": "mag_{}",
-            "z": "redshift",
-        },
-        "deep":{
-            "input":{
-                "file": "./deep_photometry_catalog.hdf5",
-                "stream": False,
-                "group": "photometry",
-                "bands": "ugrizy",
-                "band_name": "mag_{}",
-                "nmax": 1_000_000,
-                "use_band": "i", # band inlcuded in fit (as well as colors)
-                "depths": {'u': 23.7, 'g':23.5, 'r':22.9, 'i':22.2, 'z':25., 'y':25.},
-            },
-            "som": {
-                "dim": 32,
-                "rate": 0.5,
-                "sigma": 1.0,
-                "epochs": 10,
-            },
-        },
-        "output": {
-            "deep_som": "./deep.som",
-            "zmaps": "zmap.pkl",
-        },
-
-    }
-
+    config = yaml.safe_load(open("config.yml"))
     ss = SOMSummarizer(config)
     ss.run()
 

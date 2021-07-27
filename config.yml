@@ -1,0 +1,77 @@
+# The spectroscopic data set.
+# This is projected onto the deep-field
+# SOM to model the redshift distribution of each cell
+spectroscopic:
+    band_name: mag_{}
+    bands: ugrizy
+    file: ./spectroscopic_data.hdf5
+    group: /
+    stream: false
+    # name of the redshift column
+    z: redshift
+
+norm:
+    depths:
+        g: 23.5
+        i: 22.2
+        r: 22.9
+        u: 23.7
+        y: 25.0
+        z: 25.0
+    mag_min: 22
+    mag_max: 28
+
+
+deep:
+    input:
+        file: ./deep_photometry_catalog.hdf5
+        # This refers to an HDF5 group. For the root of the file,
+        # use "/"
+        group: photometry
+        bands: ugrizy
+        # The format of the column names
+        band_name: mag_{}
+        # A luptitude (if any) to include in the SOM
+        # Omit or set to null for none
+        use_band: null
+        # These estimates of the 10-sigma depths are used to
+        # compute the "Luptitudes" from the magnitudes
+        # This is opti
+        nmax: 100000
+        # Not implemented:
+        stream: false
+    som:
+        dim: 32
+        epochs: 10
+        rate: 0.5
+        sigma: 1.0
+
+
+
+wide:
+    input:
+        file: ./shear_catalog.hdf5
+        group: shear
+        bands: riz
+        band_name: mcal_mag_{}
+        use_band: i
+        # These estimates of the 10-sigma depths are used to
+        # compute the "Luptitudes" from the magnitudes
+        depths:
+            i: 22.2
+            r: 22.9
+            z: 25.0
+        # This is opti
+        nmax: 1000000
+        # Not implemented:
+        stream: false
+    som:
+        dim: 32
+        epochs: 10
+        rate: 0.5
+        sigma: 1.0
+
+output:
+    deep_som: ./deep.som
+    zmaps: zmap.pkl
+
