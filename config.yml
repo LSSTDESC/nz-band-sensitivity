@@ -58,6 +58,7 @@ redshift:
         file: ./spectroscopic_data.hdf5
         group: /
         stream: false
+        load_errors: false
         # name of the redshift column
         z: redshift
     dz: 0.02
@@ -67,14 +68,15 @@ redshift:
 
 wide:
     input:
-        file: ./shear_catalog.hdf5
+        file: /global/projecta/projectdirs/lsst/groups/WL/users/zuntz/data/cosmoDC2-1.1.4_oneyear/shear_catalog.hdf5
         group: shear
         bands: riz
         band_name: mcal_mag_{}
         use_band: i
-        nmax: 1000000
+        load_errors: false
+        #nmax: 1000000
         stream: true
-        max_chunk_size: 100000
+        max_chunk_size: 200000
         random_chunk_order: true
         order_seed: 23456
     som:
@@ -82,10 +84,11 @@ wide:
         epochs: 10
         rate: 0.5
         sigma: 1.0
-
+        use_errors: false
 
 output:
     deep_som: ./deep.som
+    wide_som: ./wide.som
     deep_name: ./deep_som
     zmaps: zmap.pkl
 

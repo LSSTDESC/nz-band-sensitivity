@@ -90,7 +90,7 @@ class LupticolorSom:
         return names, outdata, errors
 
     def winner(self, indata):
-        _, data = self.make_normalized_color_data(indata)
+        _, data, _ = self.make_normalized_color_data(indata)
         return self.som.winner(data)
 
     def __getstate__(self):
@@ -140,10 +140,12 @@ class SOMSummarizer:
         deep_zmaps = self.make_deep_zmaps(deep_som)
         self.save_maps(deep_zmaps, self.config['output']['deep_name'])
 
-        # wide_som = self.make_som(self.config['wide'])
-        # self.save_som(wide_som, self.config['output']['wide_som'])
+        wide_som = self.make_som(self.config['wide'])
+        self.save_som(wide_som, self.config['output']['wide_som'])
 
-        # self.make_transfer(deep_som, wide_som)
+        transfer = self.make_transfer(deep_som, wide_som)
+        if self.rank == 0:
+            np.save('transfer.npy', transfer)
 
 
     def make_transfer(self, deep_som, wide_som):
@@ -271,7 +273,6 @@ class SOMSummarizer:
         som = LupticolorSom(som_config, data_config, norm_config, comm=self.comm)
 
         for data in self.data_stream(data_config):
-            print(data.keys())
             som.train(data)
 
         return som
@@ -347,7 +348,9 @@ def main():
     config = yaml.safe_load(open("config.yml"))
     from mpi4py.MPI import COMM_WORLD as world
     comm = None if world.size == 1 else world
-
+    print("comm = ", comm)
+    if comm and comm.rank == 0:
+        print("world size = ", comm.size)
     ss = SOMSummarizer(config, comm)
     ss.run()
 
