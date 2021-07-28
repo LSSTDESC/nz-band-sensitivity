@@ -1,9 +1,10 @@
-import numpy as np
-import xpysom
-import h5py
 import pickle
 import yaml
 import sys
+
+import numpy as np
+import xpysom
+import h5py
 # 1) make and save the deep som
 # 2) make and save the wide som
 # 3) use the redshift and overlap samples to complete the process
@@ -108,6 +109,9 @@ class SOMSummarizer:
         deep_zmaps = self.make_deep_zmaps(deep_som)
         self.save_maps(deep_zmaps, self.config['output']['deep_name'])
 
+        wide_som = self.make_som(self.config['wide'])
+        self.save_som(wide_som, self.config['output']['wide_som'])
+
 
     def save_som(self, som, outfile):
         if self.rank == 0:
@@ -187,10 +191,7 @@ class SOMSummarizer:
 
         som = LupticolorSom(som_config, data_config, norm_config, comm=self.comm)
 
-        # TODO figure out epoch / iter thing to get training right
-        data_stream = self.data_stream(data_config)
-
-        for data in data_stream:
+        for data in self.data_stream(data_config):
             som.train(data)
 
         return som
@@ -202,7 +203,6 @@ class SOMSummarizer:
         count = np.zeros((som.dim, som.dim))
 
         config = self.config["spectroscopic"]
-        randomize = config.get('randomize', 0)
         stream = self.data_stream(config, extra={"redshift": config["z"]})
 
 
@@ -218,15 +218,19 @@ class SOMSummarizer:
 
         return count, zmean, zsigma
 
-    def save_maps(self, maps, name):
+    def save_maps(self, maps, name, plot=True):
         if self.rank != 0:
             return
 
         count, zmean, zsigma = maps
 
-        pickle.dump(count, open(f'{name}_zcount.pkl', 'wb'))
-        pickle.dump(zmean, open(f'{name}_zmean.pkl', 'wb'))
-        pickle.dump(zsigma, open(f'{name}_zsigma.pkl', 'wb'))
+        # TODO: save these in a more structured way.
+        np.save(f'{name}_zcount.npy', count)
+        np.save(f'{name}_zmean.npy', zmean)
+        np.save(f'{name}_zsigma.npy', zsigma)
+
+        if not plot:
+            return
 
         import matplotlib.pyplot as plt
         from matplotlib.colors import LogNorm

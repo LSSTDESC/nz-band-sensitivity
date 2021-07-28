@@ -63,16 +63,11 @@ wide:
         bands: riz
         band_name: mcal_mag_{}
         use_band: i
-        # These estimates of the 10-sigma depths are used to
-        # compute the "Luptitudes" from the magnitudes
-        depths:
-            i: 22.2
-            r: 22.9
-            z: 25.0
-        # This is opti
         nmax: 1000000
-        # Not implemented:
-        stream: false
+        stream: true
+        max_chunk_size: 100000
+        random_chunk_order: true
+        order_seed: 23456
     som:
         dim: 32
         epochs: 10
