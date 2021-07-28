@@ -1,16 +1,7 @@
-# The spectroscopic data set.
-# This is projected onto the deep-field
-# SOM to model the redshift distribution of each cell
-spectroscopic:
-    band_name: mag_{}
-    bands: ugrizy
-    file: ./spectroscopic_data.hdf5
-    group: /
-    stream: false
-    # name of the redshift column
-    z: redshift
 
 norm:
+    # These estimates of the 10-sigma depths are used to
+    # compute the "Luptitudes" from the magnitudes
     depths:
         g: 23.5
         i: 22.2
@@ -18,6 +9,9 @@ norm:
         u: 23.7
         y: 25.0
         z: 25.0
+    # These Luptitude limits are used to normalize values
+    # They don't have to be exact, just to roughly put most
+    # values around 0 .. 1
     mag_min: 22
     mag_max: 28
 
@@ -34,17 +28,31 @@ deep:
         # A luptitude (if any) to include in the SOM
         # Omit or set to null for none
         use_band: null
-        # These estimates of the 10-sigma depths are used to
-        # compute the "Luptitudes" from the magnitudes
-        # This is opti
-        nmax: 100000
+        # This is optional, and mainly for testing - it sets the maximum
+        # size of the 
+        # nmax: 100000
         # Not implemented:
-        stream: false
+        stream: true
+        max_chunk_size: 50000
+        random_chunk_order: true
+        order_seed: 678910
     som:
         dim: 32
         epochs: 10
         rate: 0.5
         sigma: 1.0
+
+# The spectroscopic data set.
+# This is projected onto the deep-field
+# SOM to model the redshift distribution of each cell
+spectroscopic:
+    band_name: mag_{}
+    bands: ugrizy
+    file: ./spectroscopic_data.hdf5
+    group: /
+    stream: false
+    # name of the redshift column
+    z: redshift
 
 
 
@@ -71,7 +79,9 @@ wide:
         rate: 0.5
         sigma: 1.0
 
+
 output:
     deep_som: ./deep.som
+    deep_name: ./deep_som
     zmaps: zmap.pkl
 
