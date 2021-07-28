@@ -24,6 +24,10 @@ class LupticolorSom:
         self.rate = som_config['rate']
         self.sigma = som_config['sigma']
         self.epochs = som_config['epochs']
+        self.use_errors = som_config['use_errors']
+
+        if self.use_errors:
+            raise NotImplementedError("use_errors not yet supported")
 
         self.nband = len(self.bands)
         self.nfeat = self.nband - 1 if self.use_band is None else self.nband
@@ -35,7 +39,8 @@ class LupticolorSom:
 
 
     def train(self, indata):
-        names, data = self.make_normalized_color_data(indata)
+        names, data, errors = self.make_normalized_color_data(indata)
+        # TODO: add use of errors in the SOM, and fix the luptitude errors
         self.som.train(data, self.epochs, comm=self.comm)
 
 
@@ -45,6 +50,10 @@ class LupticolorSom:
         n = list(indata.values())[0].shape[0]
 
         outdata = np.empty((n, self.nfeat))
+        if self.use_errors:
+            errors = np.empty((n, self.nfeat))
+        else:
+            errors = None
         names = []
         for i in range(self.nband - 1):
             j = i + 1
@@ -57,6 +66,14 @@ class LupticolorSom:
             # make the lupticolors - differences of luptitudes
             outdata[:, i] = luptitude(indata[b_i], depth_i) - luptitude(indata[b_j], depth_j)
 
+            if self.use_errors:
+                mag_err_i = indata[f'{b_i}_err']
+                mag_err_j = indata[f'{b_j}_err']
+                err_i = luptitude_error(indata[b_i], mag_err_i, depth_i)
+                err_j = luptitude_error(indata[b_j], mag_err_j, depth_j)
+                errors[:, i] = np.sqrt(err_i**2 + err_j**2)
+
+
         if self.use_band is not None:
             # The Lupticolors are already in roughly the right range 0 -- 1.
             # Normalize the Luptitude to the same range
@@ -65,7 +82,12 @@ class LupticolorSom:
             outdata[:, self.nband - 1] = (m - self.mag_min) / (self.mag_max - self.mag_min)
             names.append(self.use_band)
 
-        return names, outdata
+            if self.use_errors:
+                mag_err = indata[f'{self.use_band}_err']
+                err = luptitude_error(indata[self.use_band], mag_err, depth)
+                errors[:, self.nband - 1] = err
+
+        return names, outdata, errors
 
     def winner(self, indata):
         _, data = self.make_normalized_color_data(indata)
@@ -93,6 +115,14 @@ def luptitude(mag, depth, m0=22.5):
     flux = np.power(10, (m0 - mag) / 2.5)
     return mu0 - a * np.arcsinh(0.5 * flux / b)
 
+def luptitude_error(mag, mag_err, depth, m0=22.5):
+    a = 2.5 * np.log10(np.e)
+    flux = np.power(10, (m0 - mag) / 2.5)
+    sigmax = 0.1 * np.power(10, (m0 - depth) / 2.5)
+    b = 1.042 * sigmax
+    dLdm = np.log(10) * a * mag / np.sqrt(flux**2 + 4 * b**2) / 2.5
+    dL = abs(dLdm * mag_err)
+    return dL
 
 class SOMSummarizer:
     def __init__(self, config, comm=None):
@@ -105,12 +135,57 @@ class SOMSummarizer:
         deep_som = self.make_som(self.config['deep'])
         self.save_som(deep_som, self.config['output']['deep_som'])
 
-        # Could save this out here also
+        # We use the full distribution for the actual calculations.
+        # This is for plotting
         deep_zmaps = self.make_deep_zmaps(deep_som)
         self.save_maps(deep_zmaps, self.config['output']['deep_name'])
 
-        wide_som = self.make_som(self.config['wide'])
-        self.save_som(wide_som, self.config['output']['wide_som'])
+        # wide_som = self.make_som(self.config['wide'])
+        # self.save_som(wide_som, self.config['output']['wide_som'])
+
+        # self.make_transfer(deep_som, wide_som)
+
+
+    def make_transfer(self, deep_som, wide_som):
+
+        config =self.config['overlap']['wide'].copy()
+
+        bands = [f'deep_{b}' for b in deep_som.bands] + [f'wide_{b}' for b in deep_som.bands]
+
+        # errors!
+        print("add errors in make_transfer")
+
+        config['bands'] = bands
+
+        # It's never useful to randomize this data
+        config['randomize'] = False
+        
+        joint_count = np.zeros((deep_som.dim, deep_som.dim, wide_som.dim, wide_som.dim))
+        deep_count = np.zeros((deep_som.dim, deep_som.dim))
+
+        for data in self.data_stream(config):
+            # get the wide cells
+            wide = {b: data[f'wide_{b}'] for b in wide_som.bands}
+            wide_cells = wide_som.winner()
+            # get the deep cells
+            deep = {b: data[f'deep_{b}'] for b in deep_som.bands}
+            deep_cells = deep_som.winner()
+
+            # build up the transfer function
+
+            for c1, c2 in zip(wide_cells, deep_cells):
+                deep_count[c2] += 1
+                joint_count[c2][c1] += 1
+
+        # Sum the counts from all of the processors
+        if self.comm:
+            self.comm.Reduce(deep_count)
+            self.comm.Reduce(joint_count)
+        
+        # This is the transfer function
+        joint_count /= deep_count[:, :, np.newaxis, np.newaxis]
+        
+        return joint_count
 
 
     def save_som(self, som, outfile):
@@ -123,13 +198,17 @@ class SOMSummarizer:
         stream = config['stream']
         group = config['group']
         fmt = config.get('band_name', 'mag_{}')
+        err_fmt = config.get('error_name', 'mag_err_{}')
         bands = config['bands']
         nmax = config.get('nmax')
         random_order = config.get('random_chunk_order', True)
-        order_seed = config.get('order_seed', 1234567)
+        order_seed = config.get('order_seed', 1234567)        
         extra = extra or {}
 
         cols = [fmt.format(b) for b in bands]
+        if config['load_errors']:
+            for b in bands:
+                extra[f'{b}_err'] = err_fmt.format(b)
 
 
         with h5py.File(filename) as f:
@@ -180,8 +259,8 @@ class SOMSummarizer:
                 data = {b: g[col][s:e] for b,col in zip(bands,cols)}
                 for name, col in extra.items():
                     data[name] = g[col][s:e]
-
-                yield data
+                else:
+                    yield data
 
 
     def make_som(self, config):
@@ -192,6 +271,7 @@ class SOMSummarizer:
         som = LupticolorSom(som_config, data_config, norm_config, comm=self.comm)
 
         for data in self.data_stream(data_config):
+            print(data.keys())
             som.train(data)
 
         return som
@@ -202,32 +282,43 @@ class SOMSummarizer:
         zsum2 = np.zeros((som.dim, som.dim))
         count = np.zeros((som.dim, som.dim))
 
-        config = self.config["spectroscopic"]
-        stream = self.data_stream(config, extra={"redshift": config["z"]})
+        config = self.config["redshift"]
+        data_config = config["data"]
+        stream = self.data_stream(data_config, extra={"redshift": data_config["z"]})
 
+        dz = config["dz"]
+        zmax = config["zmax"]
+        nz = int(np.ceil(zmax / dz))
+        zhist = np.zeros((som.dim, som.dim, nz))
 
+        # if needed we make this way faster
+        # could probably just do it with numba
         for data in stream:
             w = som.winner(data)
             for wi, z in zip(w, data["redshift"]):
                 zsum[wi] += z
                 zsum2[wi] += z**2
                 count[wi] += 1
+                ni = int(np.floor(z / dz))
+                if ni < nz:
+                    zhist[wi][ni] += 1
         zmean = zsum / count
         zsigma = np.sqrt(zsum2 / count - zmean**2) 
 
 
-        return count, zmean, zsigma
+        return count, zmean, zsigma, zhist
 
     def save_maps(self, maps, name, plot=True):
         if self.rank != 0:
             return
 
-        count, zmean, zsigma = maps
+        count, zmean, zsigma, zhist = maps
 
         # TODO: save these in a more structured way.
         np.save(f'{name}_zcount.npy', count)
         np.save(f'{name}_zmean.npy', zmean)
         np.save(f'{name}_zsigma.npy', zsigma)
+        np.save(f'{name}_zhist.npy', zhist)
 
         if not plot:
             return

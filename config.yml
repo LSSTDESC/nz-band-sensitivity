@@ -25,6 +25,11 @@ deep:
         bands: ugrizy
         # The format of the column names
         band_name: mag_{}
+
+        # If this is set the mag errors are also loaded
+        load_errors: false
+        error_name: mag_{}_err
+
         # A luptitude (if any) to include in the SOM
         # Omit or set to null for none
         use_band: null
@@ -41,18 +46,22 @@ deep:
         epochs: 10
         rate: 0.5
         sigma: 1.0
+        use_errors: false
 
-# The spectroscopic data set.
+# The redshift sample.
 # This is projected onto the deep-field
 # SOM to model the redshift distribution of each cell
-spectroscopic:
-    band_name: mag_{}
-    bands: ugrizy
-    file: ./spectroscopic_data.hdf5
-    group: /
-    stream: false
-    # name of the redshift column
-    z: redshift
+redshift:
+    data:
+        band_name: mag_{}
+        bands: ugrizy
+        file: ./spectroscopic_data.hdf5
+        group: /
+        stream: false
+        # name of the redshift column
+        z: redshift
+    dz: 0.02
+    zmax: 3.0
 
 
 

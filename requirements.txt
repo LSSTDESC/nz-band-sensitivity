@@ -1,4 +1,4 @@
 h5py
 numpy
 matplotlib
-git+github.com/joezuntz/xpysom@torus
+git+https://github.com/joezuntz/xpysom@torus
