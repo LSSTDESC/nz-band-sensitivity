@@ -18,6 +18,7 @@ norm:
 
 deep:
     input:
+        format: hdf5
         file: ./deep_photometry_catalog.hdf5
         # This refers to an HDF5 group. For the root of the file,
         # use "/"
@@ -25,6 +26,9 @@ deep:
         bands: ugrizy
         # The format of the column names
         band_name: mag_{}
+
+        # cut down the data for testing to this size
+        nmax: 100000
 
         # If this is set the mag errors are also loaded
         load_errors: false
@@ -53,28 +57,32 @@ deep:
 # SOM to model the redshift distribution of each cell
 redshift:
     data:
+        format: hdf5
         band_name: mag_{}
         bands: ugrizy
         file: ./spectroscopic_data.hdf5
         group: /
         stream: false
         load_errors: false
-        # name of the redshift column
-        z: redshift
+        # extra columns to load, desired name: source name
+        extra:
+            redshift: redshift
     dz: 0.02
     zmax: 3.0
 
 
-
+# The wide data. This is made into another SOM and the transfer
+# function between this and the deep SOM computed
 wide:
     input:
+        format: hdf5
         file: /global/projecta/projectdirs/lsst/groups/WL/users/zuntz/data/cosmoDC2-1.1.4_oneyear/shear_catalog.hdf5
         group: shear
         bands: riz
         band_name: mcal_mag_{}
         use_band: i
         load_errors: false
-        #nmax: 1000000
+        # nmax: 1000000
         stream: true
         max_chunk_size: 200000
         random_chunk_order: true

@@ -10,7 +10,53 @@ import h5py
 # 3) use the redshift and overlap samples to complete the process
 
 
-class LupticolorSom:
+class LuptiSom:
+    """
+    Make and train a self-organizing map.
+
+    This wraps a modified version of the xpysom library (TODO: move this to DESC),
+    and converts the loaded magnitudes into luptitudes and normalizes these before
+    applying the SOM to them.
+
+    Can run in parallel with MPI by supplying an mpi4py communicator or on a GPU
+    automatically if the cupy library is installed and one is available
+
+    Parameters
+    ----------
+
+    som_config: dict
+        Dictionary of parameters describing the data to use. Contains:
+        bands: list or string of names to use
+        use_band: optional string of band to include directly in the SOM
+
+    data_config: dict
+        Dictionary of parameters describing the SOM. Contains:
+        dim: the size of the SOM (it is square)
+        rate: the initial learning rate
+        sigma: the initial kernel size
+        epochs: training steps per data point
+        use_error: (not working yet) include errors in the distance calculations
+
+    norm_config: dict
+        Dictionary of parameters decsribing how to normalize data. COntains:
+        depths: dict of bands -> approx 10 sigma depths for luptitudes
+        mag_min: min value for mag/lupt normalization. Does not need to be exact.
+        mag_max: max value for mag/lupt normalization. Does not need to be exact.
+
+    comm: MPI communicator or None
+        Optional communicator to enable MPI training
+
+    Attributes
+    ----------
+    som: xpysom.XPySom
+        The xpysom self-organizing map
+    bands: str or list
+        The bands used in the fit
+    nfeat: int
+        Number of features used in fit
+    dim: int
+        The dimension of the SOM
+    """
 
     def __init__(self, som_config, data_config, norm_config, comm=None):
         self.bands = data_config['bands']
@@ -39,12 +85,48 @@ class LupticolorSom:
 
 
     def train(self, indata):
+        """
+        Train the SOM with (a slice of) data.
+
+        Can be called multiple times with different data chunks, and called
+        in parallel
+
+        Parameters
+        ----------
+        indata: dict
+            dictionary of columns band -> array and optionally errors band_err -> array
+
+        """
         names, data, errors = self.make_normalized_color_data(indata)
         # TODO: add use of errors in the SOM, and fix the luptitude errors
+        # TODO: check how the training rate is being changed when this is called
+        #       multiple times
         self.som.train(data, self.epochs, comm=self.comm)
 
 
     def make_normalized_color_data(self, indata):
+        """
+        Convert input magnitudes to LuptiColors and normalize them.
+
+        Optionally, one Luptitude is included as well as the LuptiColors,
+        depending on the configuration used on init.
+
+        Parameters
+        ----------
+        indata: dict
+            dictionary of columns band -> array and optionally errors band_err -> array
+
+        Returns
+        -------
+        names: list
+            Names of colors and bands used
+
+        outdata: array 
+            ndata x nfeat array ready for training
+
+        errors: array
+            ndata x nfeat aray of errors on each training value
+        """
         # no degenerate colours
         # i-band + colors
         n = list(indata.values())[0].shape[0]
@@ -90,13 +172,27 @@ class LupticolorSom:
         return names, outdata, errors
 
     def winner(self, indata):
+        """
+        After training is complete, use the SOM to determine the best-fitting
+        cell for a set of objects.
+
+        TODO: modify xpysom to return this is an n x 2 array
+
+        Parameters
+        ----------
+        indata: dict
+            dictionary of columns band -> array and optionally errors band_err -> array
+
+        Returns
+        -------
+        winners: list
+            list of tuples of coordinates 
+        """
         _, data, _ = self.make_normalized_color_data(indata)
         return self.som.winner(data)
 
     def __getstate__(self):
-        # Copy the object's state from self.__dict__ which contains
-        # all our instance attributes. Always use the dict.copy()
-        # method to avoid modifying the original state.
+        # This lets us pickle this class
         state = self.__dict__.copy()
         # Replace the unpicklable mpi communicator with None
         state['comm'] = None
@@ -106,7 +202,21 @@ class LupticolorSom:
 
 def luptitude(mag, depth, m0=22.5):
     """
-    Convert magnitudes to Luptitudes
+    Convert magnitudes to luptitudes
+
+    Parameters
+    ----------
+    mag: float or array
+
+    depth: float
+        estimate of e.g. 10 sigma depth
+
+    m0: float
+        optional mag zero point (default 22.5)
+
+    Returns
+    -------
+    lupt: float or array
     """
     a = 2.5 * np.log10(np.e)
     sigmax = 0.1 * np.power(10, (m0 - depth) / 2.5)
@@ -116,6 +226,26 @@ def luptitude(mag, depth, m0=22.5):
     return mu0 - a * np.arcsinh(0.5 * flux / b)
 
 def luptitude_error(mag, mag_err, depth, m0=22.5):
+    """
+    Convert magnitude errors to luptitude errors
+
+    Parameters
+    ----------
+
+    mag: float or array
+
+    mag_err: float or array
+
+    depth: float
+        estimate of e.g. 10 sigma depth
+
+    m0: float
+        optional mag zero point (default 22.5)
+
+    Returns
+    -------
+    err: float or array
+    """
     a = 2.5 * np.log10(np.e)
     flux = np.power(10, (m0 - mag) / 2.5)
     sigmax = 0.1 * np.power(10, (m0 - depth) / 2.5)
@@ -125,37 +255,93 @@ def luptitude_error(mag, mag_err, depth, m0=22.5):
     return dL
 
 class SOMSummarizer:
+    """
+    Summarization step that estimates an n(z) using three samples,
+    wide, deep, and redshift (spectroscopy or narrow-band), with some overlap between
+    the wide and deep samples.
+
+    Generates two SOMs, for the deep and wide samples, determines the redshift
+    distribution of the deep sample using the redshift sample, and then uses the
+    overlapping data between deep and wide to compute the transfer function between
+    two SOMs.
+
+    The run method is the main entry point.
+
+    """
     def __init__(self, config, comm=None):
+        """
+
+        Parameters
+        ----------
+
+        config: dict
+            Dictionary with complete config info; see example
+        comm: mpi4py communicator or None
+            Optional; enables parallel training
+        """
         self.config = config
         self.comm = comm
         self.rank = 0 if comm is None else self.comm.rank
         self.nproc = 1 if comm is None else self.comm.size
 
     def run(self):
+        """
+        Run all the steps in the method, saving results along the way
+
+        Incomplete.
+        """
+        print("\n*** Making deep SOM ***\n")
         deep_som = self.make_som(self.config['deep'])
         self.save_som(deep_som, self.config['output']['deep_som'])
 
         # We use the full distribution for the actual calculations.
         # This is for plotting
+        print("\n*** Making deep z distribution ***\n")
         deep_zmaps = self.make_deep_zmaps(deep_som)
         self.save_maps(deep_zmaps, self.config['output']['deep_name'])
 
+        print("\n*** Making wide SOM ***\n")
         wide_som = self.make_som(self.config['wide'])
         self.save_som(wide_som, self.config['output']['wide_som'])
 
+        print("\n*** Making wide->deep transfer function ***\n")
         transfer = self.make_transfer(deep_som, wide_som)
         if self.rank == 0:
             np.save('transfer.npy', transfer)
 
 
     def make_transfer(self, deep_som, wide_som):
+        """
+        Compute the transfer function between the wide and deep SOMS.
 
+        Reads overlap data according to the config information.
+
+        Not tested yet because I need to generate some mock overlap data
+        with both wide and deep values.
+
+        Parameters
+        ----------
+
+        deep_som: LuptiSom
+            SOM trained on the deep data
+
+        wide_som: LuptiSom
+            SOM trained on the shallow data
+
+        Returns
+        -------
+        transfer: array
+            4D array mapping deep to wide cells. For each i, j, k, l
+            The array gives the fraction of objects in wide cell k, l
+            that land in deep cell i, j.
+
+        """
         config =self.config['overlap']['wide'].copy()
 
         bands = [f'deep_{b}' for b in deep_som.bands] + [f'wide_{b}' for b in deep_som.bands]
 
         # errors!
-        print("add errors in make_transfer")
+        print("TODO: add errors in make_transfer!")
 
         config['bands'] = bands
 
@@ -191,11 +377,64 @@ class SOMSummarizer:
 
 
     def save_som(self, som, outfile):
+        """
+        Save a LuptiSom to file. 
+
+        Right now this just pickles it.
+        TODO: better serialization
+
+        Parameters
+        ----------
+        som: LuptiSom
+
+        outfile: str
+        """
         if self.rank == 0:
             pickle.dump(som, open(outfile, 'wb'))
 
 
-    def data_stream(self, config, extra=None):
+    def data_stream(self, config):
+        """
+        A generator function that yields chunks of loaded data.
+
+        The "format" entry of the configuration determines the
+        data source.
+
+        TODO: maybe move to superclass?
+
+        Parameters
+        ----------
+        config: dict
+            Describes the source of the data and what to load
+
+        Yields
+        ------
+        data: dict
+            Dictionaries mapping column -> array
+        """
+        fmt = config['format']
+        if fmt in ["hdf", "hdf5"]:
+            return self.hdf5_data_stream(config)
+        else:
+            raise ValueError(f"Unknown data stream type {fmt}")
+
+
+    def hdf5_data_stream(self, config):
+        """
+        HDF5-specific implementation of data_streams.
+
+        TODO: maybe move to superclass?
+
+        Parameters
+        ----------
+        config: dict
+            Describes the source of the data and what to load
+
+        Yields
+        ------
+        data: dict
+            Dictionaries mapping column -> array
+        """
         filename = config['file']
         stream = config['stream']
         group = config['group']
@@ -205,17 +444,19 @@ class SOMSummarizer:
         nmax = config.get('nmax')
         random_order = config.get('random_chunk_order', True)
         order_seed = config.get('order_seed', 1234567)        
-        extra = extra or {}
 
-        cols = [fmt.format(b) for b in bands]
+        cols = config.get('extra', {}).copy()
+        for b in bands:
+            cols[b] = fmt.format(b)
+
         if config['load_errors']:
             for b in bands:
-                extra[f'{b}_err'] = err_fmt.format(b)
-
+                cols[f'{b}_err'] = err_fmt.format(b)
 
         with h5py.File(filename) as f:
             g = f[group]
-            sz = g[cols[0]].size
+            first_col = list(cols.values())[0]
+            sz = g[first_col].size
             if nmax:
                 sz = min(nmax, sz)
 
@@ -248,9 +489,7 @@ class SOMSummarizer:
                     s = chunk_starts[chunk_index]
                     e = chunk_ends[chunk_index]
                     print(f"Rank {self.rank} reading {filename} data range {s} - {e} (chunk {i+1} / {nchunk})")
-                    data = {b: g[col][s:e] for b,col in zip(bands,cols)}
-                    for name, col in extra.items():
-                        data[name] = g[col][s:e]
+                    data = {name: g[col][s:e] for name, col in cols.items()}
                     yield data
 
             else:
@@ -258,19 +497,31 @@ class SOMSummarizer:
                 s = block_size * self.rank
                 e = s + block_size
                 print(f"Rank {self.rank} reading {filename} its full data range {s} - {e}")
-                data = {b: g[col][s:e] for b,col in zip(bands,cols)}
-                for name, col in extra.items():
-                    data[name] = g[col][s:e]
-                else:
-                    yield data
+                data = {name: g[col][s:e] for name, col in cols.items()}
+
+                yield data
 
 
     def make_som(self, config):
+        """
+        Make and train a SOM base on some configuration options.
+
+        Parameters
+        ----------
+        config: dict
+            configuration dictionary, should contain "som", "input", and "norm"
+            sub-dicts; see LuptiSom docstring.
+
+        Returns
+        -------
+        som: LuptiSom
+            Trained SOM
+        """
         som_config = config['som']
         data_config = config['input']
         norm_config = self.config['norm']
 
-        som = LupticolorSom(som_config, data_config, norm_config, comm=self.comm)
+        som = LuptiSom(som_config, data_config, norm_config, comm=self.comm)
 
         for data in self.data_stream(data_config):
             som.train(data)
@@ -278,6 +529,31 @@ class SOMSummarizer:
         return som
 
     def make_deep_zmaps(self, som):
+        """
+        Assign data with secure redshifts (e.g. spectroscopic or narrow-band)
+        to a (deep) SOM.
+
+        Uses the "redshift" section of the configuration.
+
+        Parameters
+        ----------
+        som: LuptiSom
+            Pre-trained SOM
+
+        Returns
+        -------
+        count: array
+            2D array of number of objects per cell
+
+        zmean: array
+            2D array of mean z per cell
+
+        zsigma: array
+            2D array of standard deviation per cell
+
+        zhist: array
+            3D array of n(z) histogram per cell
+        """
 
         zsum = np.zeros((som.dim, som.dim))
         zsum2 = np.zeros((som.dim, som.dim))
@@ -285,14 +561,15 @@ class SOMSummarizer:
 
         config = self.config["redshift"]
         data_config = config["data"]
-        stream = self.data_stream(data_config, extra={"redshift": data_config["z"]})
+        stream = self.data_stream(data_config)
 
+        # Parameters of the histogram per cell
         dz = config["dz"]
         zmax = config["zmax"]
         nz = int(np.ceil(zmax / dz))
         zhist = np.zeros((som.dim, som.dim, nz))
 
-        # if needed we make this way faster
+        # if needed we xoult make this way faster
         # could probably just do it with numba
         for data in stream:
             w = som.winner(data)
@@ -306,10 +583,13 @@ class SOMSummarizer:
         zmean = zsum / count
         zsigma = np.sqrt(zsum2 / count - zmean**2) 
 
-
         return count, zmean, zsigma, zhist
 
     def save_maps(self, maps, name, plot=True):
+        """
+        Save generated deep z maps to disc and optionally
+        plots them as well.
+        """
         if self.rank != 0:
             return
 
@@ -346,11 +626,18 @@ class SOMSummarizer:
 
 def main():
     config = yaml.safe_load(open("config.yml"))
-    from mpi4py.MPI import COMM_WORLD as world
-    comm = None if world.size == 1 else world
-    print("comm = ", comm)
+
+    try:
+        from mpi4py.MPI import COMM_WORLD as world
+        comm = None if world.size == 1 else world
+    except:
+        comm = None
+
     if comm and comm.rank == 0:
-        print("world size = ", comm.size)
+        print("Running under MPI with world size = ", comm.size)
+    else:
+        print("Running in serial mode")
+
     ss = SOMSummarizer(config, comm)
     ss.run()
 
