@@ -25,13 +25,14 @@ First make sure you have access to the Cori CPU nodes: https://docs-dev.nersc.go
 
 Create an interactive job with two GPUs, twenty CPUs, and one hour with:
 
+    module load cgpu
     salloc -C gpu -t 60 -c 20 -G 2 -q interactive -A m1727
 
 I have made a shifter image with the dependencies in.  Launch with:
 
-    srun -C gpu -n 2 -c 10 --cpu-bind=cores --gpus-per-task=1 --gpu-bind=map_gpu:0,1 shifter --image joezuntz/txpipe-2004 python som_summarizer.py
+    srun -C gpu -u -n 2 -c 10 --cpu-bind=cores --gpus-per-task=1 --gpu-bind=map_gpu:0,1 shifter --image joezuntz/txpipe-2004 python som_summarizer.py
 
-This assigns one CPU to each MPI process.
+This assigns one CPU to each MPI process, runs two MPI processes with 10 CPUs on each, under shifter, and with unbuffered output.
 
 ## Roadmap
 

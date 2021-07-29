@@ -311,10 +311,11 @@ class SOMSummarizer:
         wide_som = self.make_som(self.config['wide'])
         self.save_som(wide_som, self.config['output']['wide_som'])
 
-        self.log("\n*** Making wide->deep transfer function ***\n")
-        transfer = self.make_transfer(deep_som, wide_som)
-        if self.rank == 0:
-            np.save('transfer.npy', transfer)
+        # Not yet complete:
+        # self.log("\n*** Making wide->deep transfer function ***\n")
+        # transfer = self.make_transfer(deep_som, wide_som)
+        # if self.rank == 0:
+        #     np.save('transfer.npy', transfer)
 
 
     def make_transfer(self, deep_som, wide_som):
@@ -343,12 +344,9 @@ class SOMSummarizer:
             that land in deep cell i, j.
 
         """
-        config =self.config['overlap']['wide'].copy()
+        config = self.config['overlap']['wide'].copy()
 
         bands = [f'deep_{b}' for b in deep_som.bands] + [f'wide_{b}' for b in deep_som.bands]
-
-        # errors!
-        self.log("TODO: add errors in make_transfer!")
 
         config['bands'] = bands
 
