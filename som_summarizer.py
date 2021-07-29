@@ -284,27 +284,34 @@ class SOMSummarizer:
         self.rank = 0 if comm is None else self.comm.rank
         self.nproc = 1 if comm is None else self.comm.size
 
+    def log(self, msg, root=True):
+        if self.comm is None:
+            print(msg)
+        else:
+            if (not root) or self.rank == 0:
+                print(f"Rank {self.rank}: {msg}")
+
     def run(self):
         """
         Run all the steps in the method, saving results along the way
 
         Incomplete.
         """
-        print("\n*** Making deep SOM ***\n")
+        self.log("\n*** Making deep SOM ***\n")
         deep_som = self.make_som(self.config['deep'])
         self.save_som(deep_som, self.config['output']['deep_som'])
 
         # We use the full distribution for the actual calculations.
         # This is for plotting
-        print("\n*** Making deep z distribution ***\n")
+        self.log("\n*** Making deep z distribution ***\n")
         deep_zmaps = self.make_deep_zmaps(deep_som)
         self.save_maps(deep_zmaps, self.config['output']['deep_name'])
 
-        print("\n*** Making wide SOM ***\n")
+        self.log("\n*** Making wide SOM ***\n")
         wide_som = self.make_som(self.config['wide'])
         self.save_som(wide_som, self.config['output']['wide_som'])
 
-        print("\n*** Making wide->deep transfer function ***\n")
+        self.log("\n*** Making wide->deep transfer function ***\n")
         transfer = self.make_transfer(deep_som, wide_som)
         if self.rank == 0:
             np.save('transfer.npy', transfer)
@@ -341,7 +348,7 @@ class SOMSummarizer:
         bands = [f'deep_{b}' for b in deep_som.bands] + [f'wide_{b}' for b in deep_som.bands]
 
         # errors!
-        print("TODO: add errors in make_transfer!")
+        self.log("TODO: add errors in make_transfer!")
 
         config['bands'] = bands
 
@@ -478,8 +485,7 @@ class SOMSummarizer:
                 if random_order:
                     rng = np.random.default_rng(seed=order_seed)
                     rng.shuffle(chunk_order)
-                    if self.rank == 0:
-                        print(f"Will load {nchunk} data chunks in order: {chunk_order}")
+                    self.log(f"Will load {nchunk} data chunks in order: {chunk_order}")
                     if self.comm:
                         self.comm.Bcast(chunk_order)
 
@@ -488,7 +494,7 @@ class SOMSummarizer:
                         continue
                     s = chunk_starts[chunk_index]
                     e = chunk_ends[chunk_index]
-                    print(f"Rank {self.rank} reading {filename} data range {s} - {e} (chunk {i+1} / {nchunk})")
+                    self.log(f"Reading {filename} data range {s} - {e} (chunk {i+1} / {nchunk})", root=False)
                     data = {name: g[col][s:e] for name, col in cols.items()}
                     yield data
 
@@ -496,7 +502,7 @@ class SOMSummarizer:
                 block_size = int(np.ceil(sz / self.nproc))
                 s = block_size * self.rank
                 e = s + block_size
-                print(f"Rank {self.rank} reading {filename} its full data range {s} - {e}")
+                self.log(f"Reading {filename} its full data range {s} - {e}", root=False)
                 data = {name: g[col][s:e] for name, col in cols.items()}
 
                 yield data
