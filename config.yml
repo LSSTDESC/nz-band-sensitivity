@@ -28,7 +28,7 @@ deep:
         band_name: mag_{}
 
         # cut down the data for testing to this size
-        nmax: 100000
+        # nmax: 100000
 
         # If this is set the mag errors are also loaded
         load_errors: false
@@ -37,13 +37,15 @@ deep:
         # A luptitude (if any) to include in the SOM
         # Omit or set to null for none
         use_band: null
-        # This is optional, and mainly for testing - it sets the maximum
-        # size of the 
-        # nmax: 100000
-        # Not implemented:
+
+        # Whether to load all the data at once (stream=false) or in chunks (stream=true)
         stream: true
+        # The maximum size of a chunk.
         max_chunk_size: 50000
+        # Randomize the order of loaded chunks. Within each chunk the order
+        # stays the same
         random_chunk_order: true
+        # The RNG seed for the ordering
         order_seed: 678910
     som:
         dim: 32
