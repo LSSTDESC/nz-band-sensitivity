@@ -1,0 +1,106 @@
+summarizer:
+    class: PhenoSummarizer
+
+norm:
+    # These estimates of the 10-sigma depths are used to
+    # compute the "Luptitudes" from the magnitudes
+    depths:
+        g: 23.5
+        i: 22.2
+        r: 22.9
+        u: 23.7
+        y: 25.0
+        z: 25.0
+    # These Luptitude limits are used to normalize values
+    # They don't have to be exact, just to roughly put most
+    # values around 0 .. 1
+    mag_min: 22
+    mag_max: 28
+
+
+deep:
+    input:
+        format: hdf5
+        file: ./deep_photometry_catalog.hdf5
+        # This refers to an HDF5 group. For the root of the file,
+        # use "/"
+        group: photometry
+        bands: ugrizy
+        # The format of the column names
+        band_name: mag_{}
+
+        # cut down the data for testing to this size
+        nmax: 100000
+
+        # If this is set the mag errors are also loaded
+        load_errors: false
+        error_name: mag_{}_err
+
+        # A luptitude (if any) to include in the SOM
+        # Omit or set to null for none
+        use_band: null
+
+        # Whether to load all the data at once (stream=false) or in chunks (stream=true)
+        stream: true
+        # The maximum size of a chunk.
+        max_chunk_size: 50000
+        # Randomize the order of loaded chunks. Within each chunk the order
+        # stays the same
+        random_chunk_order: true
+        # The RNG seed for the ordering
+        order_seed: 678910
+    som:
+        dim: 32
+        epochs: 10
+        rate: 0.5
+        sigma: 1.0
+        use_errors: false
+
+# The redshift sample.
+# This is projected onto the deep-field
+# SOM to model the redshift distribution of each cell
+redshift:
+    data:
+        format: hdf5
+        band_name: mag_{}
+        bands: ugrizy
+        file: ./spectroscopic_data.hdf5
+        group: /
+        stream: false
+        load_errors: false
+        # extra columns to load, desired name: source name
+        extra:
+            redshift: redshift
+    dz: 0.02
+    zmax: 3.0
+
+
+# The wide data. This is made into another SOM and the transfer
+# function between this and the deep SOM computed
+wide:
+    input:
+        format: hdf5
+        file: /global/projecta/projectdirs/lsst/groups/WL/users/zuntz/data/cosmoDC2-1.1.4_oneyear/shear_catalog.hdf5
+        group: shear
+        bands: riz
+        band_name: mcal_mag_{}
+        use_band: i
+        load_errors: false
+        # nmax: 1000000
+        stream: true
+        max_chunk_size: 200000
+        random_chunk_order: true
+        order_seed: 23456
+    som:
+        dim: 32
+        epochs: 10
+        rate: 0.5
+        sigma: 1.0
+        use_errors: false
+
+output:
+    deep_som: ./deep.som
+    wide_som: ./wide.som
+    deep_name: ./deep_som
+    zmaps: zmap.pkl
+

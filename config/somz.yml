@@ -1,3 +1,5 @@
+summarizer:
+    class: SomSummarizer
 
 norm:
     # These estimates of the 10-sigma depths are used to
@@ -28,7 +30,7 @@ deep:
         band_name: mag_{}
 
         # cut down the data for testing to this size
-        # nmax: 100000
+        nmax: 100000
 
         # If this is set the mag errors are also loaded
         load_errors: false
@@ -73,32 +75,8 @@ redshift:
     zmax: 3.0
 
 
-# The wide data. This is made into another SOM and the transfer
-# function between this and the deep SOM computed
-wide:
-    input:
-        format: hdf5
-        file: /global/projecta/projectdirs/lsst/groups/WL/users/zuntz/data/cosmoDC2-1.1.4_oneyear/shear_catalog.hdf5
-        group: shear
-        bands: riz
-        band_name: mcal_mag_{}
-        use_band: i
-        load_errors: false
-        # nmax: 1000000
-        stream: true
-        max_chunk_size: 200000
-        random_chunk_order: true
-        order_seed: 23456
-    som:
-        dim: 32
-        epochs: 10
-        rate: 0.5
-        sigma: 1.0
-        use_errors: false
-
 output:
     deep_som: ./deep.som
-    wide_som: ./wide.som
     deep_name: ./deep_som
     zmaps: zmap.pkl
 
