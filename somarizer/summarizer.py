@@ -93,9 +93,13 @@ class Summarizer:
         """
         fmt = config['format']
         if fmt in ["hdf", "hdf5"]:
-            return self.hdf5_data_stream(config)
+            stream = self.hdf5_data_stream(config)
         else:
             raise ValueError(f"Unknown data stream type {fmt}")
+
+        function = config.get('function', lambda x: x)
+        for data in stream:
+            yield function(data)
 
 
     def hdf5_data_stream(self, config):

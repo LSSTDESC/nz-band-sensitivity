@@ -1,9 +1,9 @@
 import numpy as np
 from .som import LuptiSom
-from .som_summarizer import BaseSomSummarizer
+from .summarizer import Summarizer
+from .utils import save_maps
 
-
-class PhenoSummarizer(BaseSomSummarizer):
+class PhenoSummarizer(Summarizer):
     """
     Summarization step that estimates an n(z) using three samples,
     wide, deep, and redshift (spectroscopy or narrow-band), with some overlap between
@@ -35,7 +35,9 @@ class PhenoSummarizer(BaseSomSummarizer):
         # This is for plotting
         self.log("\n*** Making deep z distribution ***\n")
         deep_zmaps = self.make_deep_zmaps(deep_som)
-        self.save_maps(deep_zmaps, self.config['output']['deep_name'])
+
+        if self.rank == 0:
+            save_maps(deep_zmaps, self.config['output']['deep_name'])
 
         self.log("\n*** Making wide SOM ***\n")
         wide_som = self.make_som(self.config['wide'])
@@ -113,3 +115,86 @@ class PhenoSummarizer(BaseSomSummarizer):
         return joint_count
 
 
+    def make_som(self, config):
+        """
+        Make and train a SOM base on some configuration options.
+
+        TODO: Might want to go in an intermediate subclass between this and the concrete som classes?
+
+        Parameters
+        ----------
+        config: dict
+            configuration dictionary, should contain "som", "input", and "norm"
+            sub-dicts; see LuptiSom docstring.
+
+        Returns
+        -------
+        som: LuptiSom
+            Trained SOM
+        """
+        som_config = config['som']
+        data_config = config['input']
+        norm_config = self.config['norm']
+
+        som = LuptiSom(som_config, data_config, norm_config, comm=self.comm)
+
+        for data in self.data_stream(data_config):
+            som.train(data)
+
+        return som
+    def make_deep_zmaps(self, som):
+        """
+        Assign data with secure redshifts (e.g. spectroscopic or narrow-band)
+        to a (deep) SOM.
+
+        Uses the "redshift" section of the configuration.
+
+        Parameters
+        ----------
+        som: LuptiSom
+            Pre-trained SOM
+
+        Returns
+        -------
+        count: array
+            2D array of number of objects per cell
+
+        zmean: array
+            2D array of mean z per cell
+
+        zsigma: array
+            2D array of standard deviation per cell
+
+        zhist: array
+            3D array of n(z) histogram per cell
+        """
+
+        zsum = np.zeros((som.dim, som.dim))
+        zsum2 = np.zeros((som.dim, som.dim))
+        count = np.zeros((som.dim, som.dim))
+
+        config = self.config["redshift"]
+        data_config = config["input"]
+        stream = self.data_stream(data_config)
+
+        # Parameters of the histogram per cell
+        dz = config["dz"]
+        zmax = config["zmax"]
+        nz = int(np.ceil(zmax / dz))
+        zhist = np.zeros((som.dim, som.dim, nz))
+
+        # if needed we xoult make this way faster
+        # could probably just do it with numba
+        for data in stream:
+            w = som.winner(data)
+            for wi, z in zip(w, data["redshift"]):
+                zsum[wi] += z
+                zsum2[wi] += z**2
+                count[wi] += 1
+                ni = int(np.floor(z / dz))
+                if ni < nz:
+                    zhist[wi][ni] += 1
+        zmean = zsum / count
+        zsigma = np.sqrt(zsum2 / count - zmean**2) 
+
+        return count, zmean, zsigma, zhist

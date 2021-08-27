@@ -60,7 +60,7 @@ deep:
 # This is projected onto the deep-field
 # SOM to model the redshift distribution of each cell
 redshift:
-    data:
+    input:
         format: hdf5
         band_name: mag_{}
         bands: ugrizy
