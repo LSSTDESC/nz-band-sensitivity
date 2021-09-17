@@ -54,6 +54,7 @@ class LuptiSom:
     def __init__(self, som_config, data_config, norm_config, comm=None):
         self.bands = data_config['bands']
         self.use_band = data_config.get('use_band', None)
+        print("Making SOM with bands: ", "".join(self.bands))
 
         self.depths = norm_config['depths']
         self.mag_min = norm_config.get("mag_min", 22)
@@ -64,6 +65,7 @@ class LuptiSom:
         self.sigma = som_config['sigma']
         self.epochs = som_config['epochs']
         self.use_errors = som_config['use_errors']
+        self.verbose = som_config.get("verbose", "False")
 
         if self.use_errors:
             raise NotImplementedError("use_errors not yet supported")
@@ -94,7 +96,7 @@ class LuptiSom:
         # TODO: add use of errors in the SOM, and fix the luptitude errors
         # TODO: check how the training rate is being changed when this is called
         #       multiple times
-        self.som.train(data, self.epochs, comm=self.comm)
+        self.som.train(data, self.epochs, comm=self.comm, verbose=self.verbose)
 
 
     def make_normalized_color_data(self, indata):
